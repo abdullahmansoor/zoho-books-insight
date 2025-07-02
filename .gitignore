@@ -1,0 +1,10 @@
+poetry.lock
+__pycache__/
+*.py~
+*.pyc
+*.pyo
+dist/
+build/
+venv/
+.env
+*.log
