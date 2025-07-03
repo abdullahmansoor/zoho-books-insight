@@ -1,188 +1,134 @@
-## README — Zoho Books “Safe-Card-Removal” Toolkit
+## 🔐 Zoho Books — Safe Card Removal Tool
 
-*A rock-solid, auditable workflow for auditing and cleansing stored cards on recurring-invoice profiles.*
+**Quickly audit and remove stored cards from all active recurring invoice profiles in Zoho Books**  
+Use this tool before switching Stripe accounts — to prevent billing failures and API errors.
 
-
-
- 
-
----
-
-### 1 . Problem statement
-
-Before you can disconnect an **old Stripe account** and wire up a new one, every recurring-invoice profile that auto-charges a customer’s card must first have that **card detached** (and, optionally, Stripe removed from its gateway list). Doing this by hand is error-prone and risky; we want an **automated, fully-auditable process** with multiple checkpoints.
+➡️ *Part of a broader platform for reporting, analytics, and predictive billing insights (coming soon).*
 
 ---
 
-### 2 . Solution overview
+### 🚀 What This Tool Does
 
-```
-safe-card-removal/
-├── auth/                 # OAuth helpers (token swap, refresh, revocation)
-│   └── token_manager.py
-├── api/                  # Thin, typed wrapper around Zoho Books REST
-│   ├── zoho_client.py
-│   └── models.py
-├── core/                 # Business logic, expressed as Commands
-│   ├── scan_profiles.py
-│   └── scrub_cards.py
-├── io/                   # Pure side-effect adapters
-│   ├── csv_writer.py
-│   ├── email_notifier.py
-│   └── logger.py
-├── runners/              # CLI entry points (click / Typer)
-│   ├── discover.py       # “Report-only” mode
-│   └── apply.py          # Two-phase mutate-and-verify
-├── tests/                # pytest unit & integration tests
-└── README.md
-```
+This tool helps you:
 
-Key design patterns
+✅ Scan all recurring invoice profiles  
+✅ Detect cards stored for auto-charge  
+✅ Generate an audit report (CSV)  
+✅ Optionally remove those cards safely  
+✅ Log all changes in an audit database
 
-| Pattern               | Where used                                     | Why                                              |
-| --------------------- | ---------------------------------------------- | ------------------------------------------------ |
-| **Facade**            | `ZohoClient`                                   | One clean interface hides HTTP guts              |
-| **Command**           | `core/scan_profiles.py`, `core/scrub_cards.py` | Uniform “execute + undo + dry-run” contract      |
-| **Repository**        | `api/models.py`                                | Turn JSON into typed dataclasses; easier testing |
-| **Strategy**          | `io/csv_writer` vs `io/email_notifier`         | Pluggable output sinks                           |
-| **Decorator (Retry)** | `io/logger.retry`                              | Exponential back-off for HTTP 429                |
+> All actions are double-checked and **dry-run by default** — no accidental changes.
 
 ---
 
-### 3 . Safety-first execution flow
+### 🧰 Prerequisites
 
-```
-┌──────────────┐      ┌──────────┐      ┌────────────┐
-│  discover.py │─dry─▶│ CSV file │─OK─▶ │  apply.py  │
-└──────────────┘      └──────────┘      └────────────┘
-        ▲                                 │
-        │ verify counts & diffs           │
-        └────────────rollback on mismatch─┘
-```
-
-1. **Read-only discovery**\
-   \*Lists every recurring profile via \**`GET /recurringinvoices`* ([zoho.com](https://www.zoho.com/books/api/v3/recurring-invoices/?utm_source=chatgpt.com))
-
-   - Writes `recurring_card_report.csv` with columns: profile-ID, customer, `card_id` present?, Stripe gateway present?
-   - Exit code is non-zero if any API error or schema drift is detected.
-
-2. **Manual review**\
-   *Open the CSV, confirm counts match Zoho UI.*\
-   *Optional*: run `pytest -k integration` which re-fetches 5 % of rows to prove determinism.
-
-3. **Two-phase mutator** (`apply.py`)\
-   *Iterates only over rows marked “Card=Yes”.*
-
-   - **Phase 1 (dry pass):** re-fetch each profile, compare hash with CSV; abort if drift.
-   - **Phase 2 (commit):**
-     1. `PUT /recurringinvoices/{id}` with `"card_id": ""` + pruned gateway list.
-     2. Immediately `GET` same profile; assert `card_id` is empty.
-     3. Append to an *audit log* (`audit_YYYYMMDD.sqlite`) with before/after JSON blobs.
-   - Failure at any step rolls back the batch (best-effort) and emails ops\@.
-
-Every network call is wrapped in: retry-with-jitter → structured log → typed validation (pydantic).
+| Requirement        | Notes                                 |
+|--------------------|----------------------------------------|
+| Python 3.9+        | Use `python3 --version` to check       |
+| Zoho Books Account | Any paid plan with API access          |
+| API Scopes         | `ZohoBooks.fullaccess.all`             |
+| Credentials        | See setup below                        |
 
 ---
 
-### 4 . Prerequisites
-
-| Requirement     | Version                                                               |
-| --------------- | --------------------------------------------------------------------- |
-| Python          | 3.9 +                                                                 |
-| Zoho Books plan | any that exposes API                                                  |
-| Scopes          | `ZohoBooks.fullaccess.all` (you can later trim)                       |
-| API creds       | organisation-ID, client-ID, secret, **refresh-token** (see Section 6) |
-
----
-
-### 5 . Quick-start
+### ⚙️ Setup Steps
 
 ```bash
-git clone https://github.com/amana-nexus/safe-card-removal.git
-cd safe-card-removal
+# 1. Clone and install
+git clone https://github.com/abdullahmansoor/zoho-books-insight.git
+cd zoho-books-insight
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 1⃣  create .env
+# 2. Create .env file
 cat > .env <<EOF
-ORGANISATION_ID=123456789
-CLIENT_ID=1000.ABC...
-CLIENT_SECRET=xxxx
-REFRESH_TOKEN=1000.yyyy
+ORGANISATION_ID=your_org_id
+CLIENT_ID=...
+CLIENT_SECRET=...
+REFRESH_TOKEN=...
 EOF
-
-# 2⃣  run discovery
-python -m runners.discover
-
-# 3⃣  inspect recurring_card_report.csv
-#     when satisfied:
-python -m runners.apply --confirm   # will ask again before mutating
 ```
 
 ---
 
-### 6 . Obtaining credentials
+### 🔍 Step 1: Run Scan (Read-only)
 
-1. **Add Client → Self Client** in the Zoho API console.
-2. Use homepage/redirect `https://localhost`; scopes `ZohoBooks.fullaccess.all`.
-3. Generate grant-code → exchange via\
-   `POST /oauth/v2/token?grant_type=authorization_code …`\
-   The response contains your **refresh\_token** (long-lived).
-4. Grab **organisation\_id** from *Settings → Manage Organisations* or via `GET /organizations`. ([zoho.com](https://www.zoho.com/books/api/v3/introduction/?utm_source=chatgpt.com))
+This finds profiles that still have stored cards:
 
----
+```bash
+python -m runners.discover
+```
 
-### 7 . Module cheat-sheet
+📄 This creates `recurring_card_report.csv` with:
 
-| Module               | Responsibilities                                             | Tests                                     |
-| -------------------- | ------------------------------------------------------------ | ----------------------------------------- |
-| `auth.token_manager` | Swap/refresh tokens; cache in mem; revoke                    | `tests/test_auth.py`                      |
-| `api.zoho_client`    | `get`, `put` with automatic query-params & retry             | `tests/test_api_contract.py` (mocks HTTP) |
-| `core.scan_profiles` | Pull pages, map to `RecurringInvoice` dataclass, return list | `tests/test_scan_profiles.py`             |
-| `core.scrub_cards`   | Idempotent command: verify → mutate → verify                 | `tests/test_scrub_cards.py`               |
-| `io.csv_writer`      | Pure function -> writes UTF-8 CSV                            | —                                         |
-| `io.logger`          | JSON logs (struct-log) routed to stdout & file               | —                                         |
+- Profile ID
+- Customer name
+- Whether card is stored
+- Whether Stripe is attached
 
 ---
 
-### 8 . Double-verification mechanics
+### 🛡️ Step 2: Remove Cards (Optional)
 
-1. **Hash-compare**: SHA-256 of canonicalised JSON before & after.
-2. **Post-write GET**: Confirms Zoho accepted the mutation.
-3. **Audit DB**: SQLite, schema `changes(id, zoho_id, before, after, ts)`.
-4. **Safety valve**: `apply.py --max‐changes 50` aborts if more than N profiles would mutate in one run.
+Only do this **after reviewing the CSV**.
 
----
+```bash
+python -m runners.apply --confirm
+```
 
-### 9 . CI / CD suggestions
+🔒 Safety features:
 
-- **Pre-commit**: black, isort, flake8, mypy
-- **GitHub Actions**: run unit tests + `python -m runners.discover --dry --limit 5` against a sandbox org
-- **Secrets**: store CI org creds in *Actions → Secrets & Variables*; use read-only scope.
-- **Release tagging**: semantic versioning; build a Docker image (`docker/Dockerfile`) for prod runs.
+- Verifies each profile again before change  
+- Confirms `card_id` is actually removed  
+- Logs each change into `audit_YYYYMMDD.sqlite`  
+- Stops if more than 50 changes are detected at once
 
----
+To test without changing anything:
 
-### 10 . Extending / hardening
-
-| Idea                       | Effort | Notes                                                 |
-| -------------------------- | ------ | ----------------------------------------------------- |
-| Encrypt `.env` with `sops` | ★★☆☆☆  | Decrypt at runtime; key in AWS KMS                    |
-| Dry-run HTML diff report   | ★☆☆☆☆  | Highlight JSON diff per profile                       |
-| Slack webhook on failure   | ★☆☆☆☆  | `io/slack_notifier.py` as new Strategy                |
-| Rollback script            | ★★☆☆☆  | Reads audit DB, re-applies old `card_id`              |
-| Replace fullaccess scope   | ★★☆☆☆  | Narrow to `recurringinvoices.READ/UPDATE` once stable |
+```bash
+python -m runners.apply  # No --confirm = dry-run
+```
 
 ---
 
-### 11 . References
+### 📁 Output Files
 
-- Zoho Books API – Recurring Invoices endpoints ([zoho.com](https://www.zoho.com/books/api/v3/recurring-invoices/?utm_source=chatgpt.com))
-- Community thread on associating/removing `customer_card_id` (shows presence of `card_id` field) ([help.zoho.com](https://help.zoho.com/portal/en/community/topic/adding-recurring-invoice-via-api-how-to-enter-credit-card-details-for-auto-charge?utm_source=chatgpt.com))
+| File                         | Description                          |
+|-----------------------------|--------------------------------------|
+| `recurring_card_report.csv` | Summary of active profiles/cards     |
+| `audit_YYYYMMDD.sqlite`     | Log of all verified changes          |
 
 ---
 
-### 12 . License & liability
+### ❓ Troubleshooting
 
-This toolkit is released under the **MIT License**.\
-Use at your own risk; always test in a sandbox organisation before touching production data.
+- **No `.env` file** → make sure `.env` exists at project root
+- **Invalid token** → regenerate your refresh token
+- **Too many profiles** → use `--limit` option:  
+  ```bash
+  python -m runners.discover --limit 20
+  ```
+
+---
+
+### 🙋 FAQ
+
+**Q: Is this safe for production?**  
+A: Yes — but always run the discovery step and confirm CSV before using `--confirm`.
+
+**Q: Can I rollback changes?**  
+A: Not automatically yet, but all old values are saved in `audit.sqlite`.
+
+**Q: Where do I get Zoho credentials?**  
+A: From https://api-console.zoho.com → Add Self Client → use `localhost` redirect URI.
+
+---
+
+### 👩‍💻 Optional: Test the Setup
+
+```bash
+pytest tests/test.py
+```
+
+This checks token access and validates your Zoho org ID.
