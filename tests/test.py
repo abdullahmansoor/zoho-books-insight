@@ -1,7 +1,9 @@
 # tests/test_smoke_api.py
 import os, time, requests
 import sys
-sys.path.append("/Users/abdullahmansoor/Documents/ML101/zoho-app/src")  # Add src to the path for imports
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
+
 from zoho_app.utils.env import load_project_env
 load_project_env()
 

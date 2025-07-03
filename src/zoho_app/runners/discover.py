@@ -4,8 +4,7 @@ import typer
 from pathlib import Path
 from typing import Optional
 
-import sys
-sys.path.append("/Users/abdullahmansoor/Documents/ML101/zoho-app/src")  # Add src to the path for imports
+sys.path.append(str(Path(__file__).resolve().parents[3] / "src"))
 
 from zoho_app.utils.env import load_project_env
 from zoho_app.core.scan_profiles import fetch_recurring_profiles
@@ -16,8 +15,8 @@ app = typer.Typer()
 @app.command()
 def main(
     out: Optional[str] = typer.Option("recurring_card_report.csv", help="Output CSV file name"),
-    dry: bool = typer.Option(False, help="Dry-run mode (prints summary only)"),
-    limit: Optional[int] = typer.Option(None, help="Limit number of profiles for testing")
+    dry: bool = typer.Option(True, help="Dry-run mode (prints summary only)"),
+    limit: Optional[int] = typer.Option(2, help="Limit number of profiles for testing")
 ):
     """Discover recurring-invoice profiles and report stored card/gateway status."""
     try:

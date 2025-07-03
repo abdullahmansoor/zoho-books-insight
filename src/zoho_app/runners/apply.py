@@ -9,7 +9,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import List
 import sys
-sys.path.append("/Users/abdullahmansoor/Documents/ML101/zoho-app/src")  # Add src to the path for imports
+
+from pathlib import Path
+sys.path.append(str(Path(__file__).resolve().parents[3] / "src"))
 
 from zoho_app.utils.env import load_project_env
 from zoho_app.api.zoho_client import ZohoClient

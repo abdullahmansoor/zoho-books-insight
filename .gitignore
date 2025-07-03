@@ -8,3 +8,6 @@ build/
 venv/
 .env
 *.log
+myNotesx.txt
+*.bak
+*.sqlite
